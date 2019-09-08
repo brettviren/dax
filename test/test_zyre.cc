@@ -92,7 +92,9 @@ adder_actor(zsock_t* pipe, void* args)
         
         if (which == isock) {
             zsock_recv(isock, "i", &number);
-            if (number < 0) {
+            if (number > 100000) {
+                zsys_info("adder: it's big enough already");
+                zsock_signal(pipe, 1);
                 break;
             }
             ++number;           // the actual payload operation
@@ -140,14 +142,12 @@ zyre_adder_actor(zsock_t* pipe, void* vargs)
 
         void* which = zpoller_wait(poller, 1000);
         
-        zsys_info("zyre (\"%s\") poll", name.c_str());
-
         if (which == pipe) {
             break;
         }
 
         if (!which) {           // timeout
-            zsys_info("zyre (\"%s\") sending VALUE", name.c_str());
+            //zsys_info("zyre (\"%s\") sending VALUE", name.c_str());
             zsock_send(zactor_sock(adder), "s", "VALUE");
             continue;
         }
@@ -174,12 +174,15 @@ zyre_adder_actor(zsock_t* pipe, void* vargs)
                 zsys_info("Connected to %s", endpoint);
                 free (endpoint);
             }
-            if (streq(method, "VALUE")) {
+            else if (streq(method, "VALUE")) {
                 zsys_info("zyre (\"%s\") receiving VALUE", name.c_str());
                 zframe_t* fr = zmsg_pop(msg);
                 const int value = *(int*)zframe_data(fr); // sketchy as hell
                 zframe_destroy(&fr);
                 zsys_info("zyre (\"%s\") value is %d", name.c_str(), value);
+            }
+            else {
+                break;
             }
             free(method);
             zmsg_destroy(&msg);
@@ -208,7 +211,10 @@ int main()
     zpoller_t* poller = zpoller_new(zactor_sock(za1), zactor_sock(za2), NULL);
 
     while (!zsys_interrupted) {
-        zpoller_wait(poller, -1);
+        void* which = zpoller_wait(poller, -1);
+        if (which) {
+            break;
+        }
         break;
     }
 
