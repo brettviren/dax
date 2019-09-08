@@ -28,8 +28,16 @@ char* get_hostname()
 }
 
 static void
-adder_actor(zsock_t* pipe, void* args)
+adder_actor(zsock_t* pipe, void* vargs)
 {
+    // 0. convert to using zloop and handler functions
+    // 1. auto cfg = json::parse((char*)vargs);
+    // 2. loop over cfg["sockets"]
+    // 3. each gives ztype, a name, a role (eg "input" vs "output")
+    // 4. create and associate with zlooper handler function based based on role
+    // 5. store name->zsock_t* map
+    // 6. extend CONNECT/BIND command messages provide name
+
     char* hostname = get_hostname();
 
     zsock_t* isock = zsock_new(ZMQ_SUB);
@@ -56,7 +64,6 @@ adder_actor(zsock_t* pipe, void* args)
                 break;
             }
             char *method = zmsg_popstr (msg);
-
     
             if (streq (method, "BIND")) {
                 char *endpoint = zmsg_popstr (msg);
