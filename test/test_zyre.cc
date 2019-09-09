@@ -17,14 +17,15 @@
 #include "json.hpp"
 using json = nlohmann::json;
 
-char* get_hostname()
+const char* get_hostname()
 {
-    zactor_t *beacon = zactor_new (zbeacon, NULL);
-    assert (beacon);
-    zsock_send (beacon, "si", "CONFIGURE", 31415);
-    char *hostname = zstr_recv (beacon);
-    zactor_destroy (&beacon);
-    return hostname;
+    return "localhost";
+    // zactor_t *beacon = zactor_new (zbeacon, NULL);
+    // assert (beacon);
+    // zsock_send (beacon, "si", "CONFIGURE", 31415);
+    // char *hostname = zstr_recv (beacon);
+    // zactor_destroy (&beacon);
+    // return hostname;
 }
 
 static void
@@ -38,7 +39,7 @@ adder_actor(zsock_t* pipe, void* vargs)
     // 5. store name->zsock_t* map
     // 6. extend CONNECT/BIND command messages provide name
 
-    char* hostname = get_hostname();
+    const char* hostname = get_hostname();
 
     zsock_t* isock = zsock_new(ZMQ_SUB);
     assert(isock);
@@ -78,7 +79,7 @@ adder_actor(zsock_t* pipe, void* vargs)
             }
             else if (streq (method, "CONNECT")) {
                 char *endpoint = zmsg_popstr (msg);
-                zsock_connect(isock, endpoint);
+                zsock_connect(isock, "%s", endpoint);
                 zstr_sendm (pipe, "CONNECT");
                 zstr_sendf (pipe, "%s", endpoint);
                 zsys_info("adder connect to %s", endpoint);
@@ -99,7 +100,7 @@ adder_actor(zsock_t* pipe, void* vargs)
         
         if (which == isock) {
             zsock_recv(isock, "i", &number);
-            if (number > 100000) {
+            if (number > 1000000) {
                 zsys_info("adder: it's big enough already");
                 zsock_signal(pipe, 1);
                 break;
@@ -140,10 +141,18 @@ zyre_adder_actor(zsock_t* pipe, void* vargs)
 
     zyre_t* zyre = zyre_new(name.c_str());
     zyre_set_header(zyre, name.c_str(), "%s", bind_address);
+    //zyre_set_expired_timeout(zyre, 1000);
+    zyre_set_verbose(zyre);
     free(bind_address);
+    //zyre_join(zyre, "ALIVE");
     zyre_start(zyre);
+    zyre_print(zyre);
+
+    std::string want_peer_uuid = "";
 
     zpoller_t* poller = zpoller_new(pipe, zactor_sock(adder), zyre_socket(zyre), NULL);
+
+    int last_value = 0;
 
     while (!zsys_interrupted) {
 
@@ -156,6 +165,14 @@ zyre_adder_actor(zsock_t* pipe, void* vargs)
         if (!which) {           // timeout
             //zsys_info("zyre (\"%s\") sending VALUE", name.c_str());
             zsock_send(zactor_sock(adder), "s", "VALUE");
+
+            //zyre_shouts(zyre, "ALIVE", "ALIVE %d", last_value);
+            if (want_peer_uuid.size()) {
+                zsys_info("zyre (\"%s\") whiser to: \"%x\"",
+                          name.c_str(), want_peer_uuid.c_str());
+                int rc = zyre_whispers(zyre, want_peer_uuid.c_str(), "ALIVE %d", last_value);
+                assert (rc == 0);
+            }
             continue;
         }
 
@@ -168,8 +185,12 @@ zyre_adder_actor(zsock_t* pipe, void* vargs)
                 if (endpoint) {
                     zsys_info("zyre (\"%s\") sending CONNECT %s", name.c_str(), endpoint);
                     zsock_send(zactor_sock(adder), "ss", "CONNECT", endpoint);
+                    want_peer_uuid = zyre_event_peer_uuid(zev);
+                    zsys_info("zyre (\"%s\") peer: %s",
+                              name.c_str(), want_peer_uuid.c_str());
                 }
             }
+            zyre_event_print(zev);
             zyre_event_destroy(&zev);
             continue;
         }
@@ -184,9 +205,9 @@ zyre_adder_actor(zsock_t* pipe, void* vargs)
             else if (streq(method, "VALUE")) {
                 zsys_info("zyre (\"%s\") receiving VALUE", name.c_str());
                 zframe_t* fr = zmsg_pop(msg);
-                const int value = *(int*)zframe_data(fr); // sketchy as hell
+                last_value = *(int*)zframe_data(fr); // sketchy as hell
                 zframe_destroy(&fr);
-                zsys_info("zyre (\"%s\") value is %d", name.c_str(), value);
+                zsys_info("zyre (\"%s\") value is %d", name.c_str(), last_value);
             }
             else {
                 break;
